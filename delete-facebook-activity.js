@@ -1,0 +1,292 @@
+// Standalone Facebook activity deletion script
+const { chromium } = require('playwright');
+const readline = require('readline');
+
+async function getActivityURL() {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  return new Promise((resolve) => {
+    rl.question('Enter the Facebook activity URL: ', (url) => {
+      rl.close();
+      if (!url) {
+        console.log(
+          'Error: URL is required. Please run the script again and provide a valid URL.'
+        );
+        process.exit(1);
+      }
+      resolve(url);
+    });
+  });
+}
+
+async function deleteFacebookActivity() {
+  console.log('Starting Facebook activity deletion...');
+
+  // Get activity URL from user input
+  const activityURL = await getActivityURL();
+  console.log(`Using activity URL: ${activityURL}`);
+
+  // Launch browser
+  const browser = await chromium.launch({
+    headless: false,
+    slowMo: 100,
+  });
+
+  const context = await browser.newContext();
+  const page = await context.newPage();
+
+  try {
+    // Navigate to the Facebook activity page
+    await page.goto(activityURL);
+    console.log('Navigated to Facebook activity page');
+
+    // Wait for user to log in
+    console.log(
+      'Please log in to Facebook. Press any key in the terminal when ready...'
+    );
+    await waitForKeyPress();
+    console.log('Continuing with activity deletion...');
+
+    // Initialize counters
+    let deletedCount = 0;
+    let failedCount = 0;
+    let noMoreItems = false;
+    let consecutiveFailures = 0;
+    const MAX_CONSECUTIVE_FAILURES = 5;
+
+    // Main deletion loop
+    while (!noMoreItems) {
+      try {
+        // Using the specific selector for the three dots "more options" menu button
+        const menuButtons = page.locator('div[aria-label="More options"]');
+
+        await page.waitForTimeout(1000); // Wait for page to settle
+        const count = await menuButtons.count();
+
+        if (count === 0) {
+          consecutiveFailures++;
+          console.log(
+            `No menu buttons found. Attempt ${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}`
+          );
+
+          if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            console.log(
+              'Reached maximum consecutive failures. No more items to delete.'
+            );
+            noMoreItems = true;
+            break;
+          }
+
+          // Try scrolling to load more content
+          await autoScroll(page);
+          await page.waitForTimeout(2000);
+          continue;
+        }
+
+        // Reset consecutive failures counter if we found items
+        consecutiveFailures = 0;
+
+        // Get the first visible menu button
+        const visibleButtons = [];
+        for (let i = 0; i < count; i++) {
+          const button = menuButtons.nth(i);
+          if (await button.isVisible()) {
+            visibleButtons.push(button);
+          }
+        }
+
+        if (visibleButtons.length === 0) {
+          console.log(
+            'No visible menu buttons found, scrolling to find more...'
+          );
+          await autoScroll(page);
+          await page.waitForTimeout(1500);
+          continue;
+        }
+
+        // Use the first visible button
+        const menuButton = visibleButtons[0];
+
+        // Ensure the button is visible in viewport before clicking
+        await menuButton.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(500);
+
+        console.log('Clicking menu button...');
+        // Click the menu button
+        await menuButton.click({ force: true });
+        await page.waitForTimeout(1000);
+
+        // Look for the menu items - always choose the first option
+        const menuItems = page.locator('div[role="menuitem"]');
+        const menuItemCount = await menuItems.count();
+
+        // Wait a moment for the menu to fully appear
+        await page.waitForTimeout(1000);
+
+        if (menuItemCount > 0) {
+          // Always click the first menu item (index 0)
+          const firstMenuItem = menuItems.nth(0);
+          const menuText = await firstMenuItem.textContent();
+          console.log(`Clicking first menu item: "${menuText}"`);
+
+          await firstMenuItem.click();
+          await page.waitForTimeout(1500);
+
+          // CHANGED SECTION: Always assume there will be a modal with either Delete?, Remove?, or Remove tags?
+          console.log('Looking for confirmation modal...');
+
+          // Wait for any modal dialog to appear
+          await page.waitForTimeout(1000);
+
+          // Check specifically for the three modal types
+          let confirmed = false;
+
+          try {
+            // Check for Delete? modal first
+            const deleteModal = page.locator('div[aria-label="Delete?"]');
+            const removeModal = page.locator('div[aria-label="Remove?"]');
+            const removeTagsModal = page.locator(
+              'div[aria-label="Remove tags?"]'
+            );
+
+            if (await deleteModal.isVisible()) {
+              console.log('Delete? modal found');
+              // Look for Delete button specifically within this modal
+              const deleteButton = deleteModal
+                .locator('div[aria-label="Delete"]')
+                .first();
+              if (await deleteButton.isVisible()) {
+                console.log('Clicking Delete button...');
+                await deleteButton.click();
+                confirmed = true;
+              }
+            }
+            // If Delete modal not found, try Remove modal
+            else if (await removeModal.isVisible()) {
+              console.log('Remove? modal found');
+              // Look for Remove button specifically within this modal
+              const removeButton = removeModal
+                .locator('div[aria-label="Remove"]')
+                .first();
+              if (await removeButton.isVisible()) {
+                console.log('Clicking Remove button...');
+                await removeButton.click();
+                confirmed = true;
+              }
+            }
+            // If neither Delete nor Remove modal found, try Remove tags modal
+            else if (await removeTagsModal.isVisible()) {
+              console.log('Remove tags? modal found');
+              // Look for Remove button specifically within this modal
+              const removeTagsButton = removeTagsModal
+                .locator('div[aria-label="Remove"]')
+                .first();
+              if (await removeTagsButton.isVisible()) {
+                console.log('Clicking Remove button in Remove tags modal...');
+                await removeTagsButton.click();
+                confirmed = true;
+              }
+            }
+
+            if (confirmed) {
+              // Wait for modal to disappear
+              await page.waitForTimeout(2000);
+              deletedCount++;
+              console.log(
+                `Successfully deleted item. Total deleted: ${deletedCount}`
+              );
+            } else {
+              console.log('Could not find expected buttons in the modal');
+              // Try to close the modal and continue
+              await page.keyboard.press('Escape');
+              failedCount++;
+            }
+          } catch (modalError) {
+            console.log('Error handling modal:', modalError.message);
+            // Try Escape to close any open dialogs
+            await page.keyboard.press('Escape');
+            await page.waitForTimeout(1000);
+            failedCount++;
+          }
+        } else {
+          console.log('No menu items found, closing menu...');
+          await page.keyboard.press('Escape');
+          await page.waitForTimeout(1000);
+          failedCount++;
+        }
+
+        // Wait a moment before continuing to next item
+        await page.waitForTimeout(2000);
+      } catch (error) {
+        console.error('Error during deletion process:', error);
+        failedCount++;
+
+        // Try to recover by pressing Escape and continuing
+        try {
+          await page.keyboard.press('Escape');
+          await page.waitForTimeout(1000);
+          await page.keyboard.press('Escape'); // Press twice to ensure menus are closed
+        } catch (escapeError) {
+          // Ignore if Escape fails
+        }
+
+        await page.waitForTimeout(2000);
+      }
+    }
+
+    // Final report
+    console.log('\n===== FACEBOOK ACTIVITY DELETION REPORT =====');
+    console.log(`Total items successfully deleted: ${deletedCount}`);
+    console.log(`Total items failed to delete: ${failedCount}`);
+    console.log('==========================================\n');
+  } catch (error) {
+    console.error('Fatal error during execution:', error);
+  } finally {
+    // Keep the browser open for review
+    console.log(
+      'Script finished. Browser will remain open. Press Ctrl+C to exit when done.'
+    );
+  }
+}
+
+// Helper function to wait for a keypress
+function waitForKeyPress() {
+  return new Promise((resolve) => {
+    console.log('Press any key to continue...');
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.once('data', () => {
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+      resolve();
+    });
+  });
+}
+
+// Helper function to scroll down the page to load more content
+async function autoScroll(page) {
+  await page.evaluate(async () => {
+    await new Promise((resolve) => {
+      let totalHeight = 0;
+      const distance = 100;
+      const timer = setInterval(() => {
+        const scrollHeight = document.body.scrollHeight;
+        window.scrollBy(0, distance);
+        totalHeight += distance;
+
+        if (totalHeight >= scrollHeight - window.innerHeight) {
+          clearInterval(timer);
+          resolve();
+        }
+      }, 100);
+    });
+  });
+
+  console.log('Scrolled down to load more content');
+}
+
+// Run the script
+deleteFacebookActivity();
