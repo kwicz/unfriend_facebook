@@ -32,7 +32,7 @@ async function deleteFacebookActivity() {
   // Launch browser
   const browser = await chromium.launch({
     headless: false,
-    slowMo: 100,
+    slowMo: 50, // Reduced from 100 to 50 to make script faster
   });
 
   const context = await browser.newContext();
@@ -56,6 +56,8 @@ async function deleteFacebookActivity() {
     let noMoreItems = false;
     let consecutiveFailures = 0;
     const MAX_CONSECUTIVE_FAILURES = 5;
+    let pageRefreshes = 0;
+    const MAX_PAGE_REFRESHES = 5;
 
     // Main deletion loop
     while (!noMoreItems) {
@@ -63,7 +65,7 @@ async function deleteFacebookActivity() {
         // Using the specific selector for the three dots "more options" menu button
         const menuButtons = page.locator('div[aria-label="More options"]');
 
-        await page.waitForTimeout(1000); // Wait for page to settle
+        await page.waitForTimeout(800); // Reduced from 1000 to 800
         const count = await menuButtons.count();
 
         if (count === 0) {
@@ -73,16 +75,28 @@ async function deleteFacebookActivity() {
           );
 
           if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-            console.log(
-              'Reached maximum consecutive failures. No more items to delete.'
-            );
-            noMoreItems = true;
-            break;
+            // Try refreshing the page if no menu buttons are found
+            if (pageRefreshes < MAX_PAGE_REFRESHES) {
+              pageRefreshes++;
+              consecutiveFailures = 0;
+              console.log(
+                `Refreshing page to find more items. Refresh attempt ${pageRefreshes}/${MAX_PAGE_REFRESHES}`
+              );
+              await page.reload();
+              await page.waitForTimeout(3000); // Wait for page to reload
+              continue;
+            } else {
+              console.log(
+                'Reached maximum page refreshes. No more items to delete.'
+              );
+              noMoreItems = true;
+              break;
+            }
           }
 
           // Try scrolling to load more content
           await autoScroll(page);
-          await page.waitForTimeout(2000);
+          await page.waitForTimeout(1500); // Reduced from 2000 to 1500
           continue;
         }
 
@@ -103,7 +117,7 @@ async function deleteFacebookActivity() {
             'No visible menu buttons found, scrolling to find more...'
           );
           await autoScroll(page);
-          await page.waitForTimeout(1500);
+          await page.waitForTimeout(1000); // Reduced from 1500 to 1000
           continue;
         }
 
@@ -112,34 +126,65 @@ async function deleteFacebookActivity() {
 
         // Ensure the button is visible in viewport before clicking
         await menuButton.scrollIntoViewIfNeeded();
-        await page.waitForTimeout(500);
+        await page.waitForTimeout(300); // Reduced from 500 to 300
 
         console.log('Clicking menu button...');
         // Click the menu button
         await menuButton.click({ force: true });
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(800); // Reduced from 1000 to 800
 
-        // Look for the menu items - always choose the first option
+        // Look for the menu items
         const menuItems = page.locator('div[role="menuitem"]');
         const menuItemCount = await menuItems.count();
 
         // Wait a moment for the menu to fully appear
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(800); // Reduced from 1000 to 800
 
         if (menuItemCount > 0) {
-          // Always click the first menu item (index 0)
+          // Check first menu item text
           const firstMenuItem = menuItems.nth(0);
-          const menuText = await firstMenuItem.textContent();
-          console.log(`Clicking first menu item: "${menuText}"`);
+          const firstMenuText = await firstMenuItem.textContent();
 
-          await firstMenuItem.click();
-          await page.waitForTimeout(1500);
+          // Determine which menu item to click
+          let menuItemToClick;
+          let menuText;
 
-          // CHANGED SECTION: Always assume there will be a modal with either Delete?, Remove?, or Remove tags?
+          // If first item contains "Hide", use the second menu item (if available)
+          if (firstMenuText.includes('Hide')) {
+            if (menuItemCount > 1) {
+              menuItemToClick = menuItems.nth(1);
+              menuText = await menuItemToClick.textContent();
+              console.log(
+                `First item contains "Hide", clicking second menu item: "${menuText}"`
+              );
+            } else {
+              // If only one item is available (which has "Hide"), just close and skip
+              console.log('Only "Hide" option available, skipping this item');
+              await page.keyboard.press('Escape');
+              await page.waitForTimeout(800);
+              continue;
+            }
+          } else {
+            // Use the first menu item if it doesn't contain "Hide"
+            menuItemToClick = firstMenuItem;
+            menuText = firstMenuText;
+            console.log(`Clicking first menu item: "${menuText}"`);
+          }
+
+          // Store the current URL or some element count to detect changes
+          const elementCountBefore = await page
+            .locator('div[aria-label="More options"]')
+            .count();
+          const urlBefore = page.url();
+
+          // Click the selected menu item
+          await menuItemToClick.click();
+          await page.waitForTimeout(1000); // Reduced from 1500 to 1000
+
           console.log('Looking for confirmation modal...');
 
           // Wait for any modal dialog to appear
-          await page.waitForTimeout(1000);
+          await page.waitForTimeout(800);
 
           // Check specifically for the three modal types
           let confirmed = false;
@@ -189,17 +234,37 @@ async function deleteFacebookActivity() {
                 await removeTagsButton.click();
                 confirmed = true;
               }
+            } else {
+              // No modal found - check if the page content changed indicating a successful deletion
+              await page.waitForTimeout(1000);
+              const elementCountAfter = await page
+                .locator('div[aria-label="More options"]')
+                .count();
+              const urlAfter = page.url();
+
+              // If we observe a change (fewer elements or URL change), consider it a success
+              if (
+                elementCountAfter < elementCountBefore ||
+                urlAfter !== urlBefore
+              ) {
+                console.log(
+                  'No modal appeared, but item appears to have been deleted'
+                );
+                confirmed = true;
+              }
             }
 
             if (confirmed) {
-              // Wait for modal to disappear
-              await page.waitForTimeout(2000);
+              // Wait for modal to disappear or action to complete
+              await page.waitForTimeout(1500);
               deletedCount++;
               console.log(
                 `Successfully deleted item. Total deleted: ${deletedCount}`
               );
             } else {
-              console.log('Could not find expected buttons in the modal');
+              console.log(
+                'Could not find expected buttons in the modal or confirm deletion'
+              );
               // Try to close the modal and continue
               await page.keyboard.press('Escape');
               failedCount++;
@@ -208,18 +273,18 @@ async function deleteFacebookActivity() {
             console.log('Error handling modal:', modalError.message);
             // Try Escape to close any open dialogs
             await page.keyboard.press('Escape');
-            await page.waitForTimeout(1000);
+            await page.waitForTimeout(800);
             failedCount++;
           }
         } else {
           console.log('No menu items found, closing menu...');
           await page.keyboard.press('Escape');
-          await page.waitForTimeout(1000);
+          await page.waitForTimeout(800); // Reduced from 1000 to 800
           failedCount++;
         }
 
         // Wait a moment before continuing to next item
-        await page.waitForTimeout(2000);
+        await page.waitForTimeout(1500); // Reduced from 2000 to 1500
       } catch (error) {
         console.error('Error during deletion process:', error);
         failedCount++;
@@ -227,13 +292,13 @@ async function deleteFacebookActivity() {
         // Try to recover by pressing Escape and continuing
         try {
           await page.keyboard.press('Escape');
-          await page.waitForTimeout(1000);
+          await page.waitForTimeout(800); // Reduced from 1000 to 800
           await page.keyboard.press('Escape'); // Press twice to ensure menus are closed
         } catch (escapeError) {
           // Ignore if Escape fails
         }
 
-        await page.waitForTimeout(2000);
+        await page.waitForTimeout(1500); // Reduced from 2000 to 1500
       }
     }
 
@@ -241,6 +306,7 @@ async function deleteFacebookActivity() {
     console.log('\n===== FACEBOOK ACTIVITY DELETION REPORT =====');
     console.log(`Total items successfully deleted: ${deletedCount}`);
     console.log(`Total items failed to delete: ${failedCount}`);
+    console.log(`Page refreshes: ${pageRefreshes}`);
     console.log('==========================================\n');
   } catch (error) {
     console.error('Fatal error during execution:', error);
