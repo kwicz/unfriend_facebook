@@ -1,6 +1,36 @@
 // Standalone Facebook activity deletion script
 const { chromium } = require('playwright');
 const readline = require('readline');
+const fs = require('fs');
+
+// Data structure to store deleted activities
+const deletedActivities = {
+  items: [],
+  summary: {
+    totalDeleted: 0,
+    totalFailed: 0,
+    pageRefreshes: 0,
+    startTime: new Date().toISOString(),
+    endTime: null,
+  },
+};
+
+// Load existing data if available
+try {
+  if (fs.existsSync('./deletedActivity.json')) {
+    const existingData = JSON.parse(
+      fs.readFileSync('./deletedActivity.json', 'utf8')
+    );
+    if (existingData && existingData.items) {
+      deletedActivities.items = existingData.items;
+      console.log(
+        `Loaded ${existingData.items.length} existing activity records`
+      );
+    }
+  }
+} catch (err) {
+  console.log('No existing activity records found, starting fresh');
+}
 
 async function getActivityURL() {
   const rl = readline.createInterface({
@@ -65,7 +95,7 @@ async function deleteFacebookActivity() {
         // Using the specific selector for the three dots "more options" menu button
         const menuButtons = page.locator('div[aria-label="More options"]');
 
-        await page.waitForTimeout(800); // Reduced from 1000 to 800
+        await page.waitForTimeout(800);
         const count = await menuButtons.count();
 
         if (count === 0) {
@@ -94,9 +124,10 @@ async function deleteFacebookActivity() {
             }
           }
 
-          // Try scrolling to load more content
-          await autoScroll(page);
-          await page.waitForTimeout(1500); // Reduced from 2000 to 1500
+          // Refresh instead of scrolling when no menu items are found
+          console.log('No menu buttons found, refreshing the page...');
+          await page.reload();
+          await page.waitForTimeout(3000); // Wait for page to reload
           continue;
         }
 
@@ -123,6 +154,68 @@ async function deleteFacebookActivity() {
 
         // Use the first visible button
         const menuButton = visibleButtons[0];
+
+        // Before clicking the menu, try to get the activity date using the specified selector
+        let activityDate = null;
+        let activityType = null;
+        let activityContent = null;
+
+        try {
+          // Find the parent activity log item that contains this menu button
+          const activityItem = menuButton.locator(
+            'xpath=./ancestor::div[@aria-label="Activity Log Item"]'
+          );
+
+          // Get the activity date
+          const dateElement = activityItem
+            .locator('h2 span.html-span > span')
+            .first();
+
+          // Get the activity type using the specific CSS selector
+          const activityTypeElement = activityItem
+            .locator(
+              'span[style="--fontSize: 15px; --lineHeight: 19.6421px; --8dd7yt: -0.3085em; --hxtmnb: -0.2915em;"]'
+            )
+            .first();
+
+          // Get the activity content using the specific CSS selector
+          const activityContentElement = activityItem
+            .locator(
+              'span[style="--fontSize: 13px; --lineHeight: 18.2231px; --8dd7yt: -0.3547em; --hxtmnb: -0.3376em;"]'
+            )
+            .first();
+
+          if (await dateElement.isVisible()) {
+            activityDate = await dateElement.textContent();
+            console.log(`Found activity date: ${activityDate}`);
+          } else {
+            console.log('Could not find activity date element');
+          }
+
+          if (await activityTypeElement.isVisible()) {
+            activityType = await activityTypeElement.textContent();
+            console.log(`Found activity type: ${activityType}`);
+          } else {
+            console.log(
+              'Could not find activity type element with the specified selector'
+            );
+          }
+
+          if (await activityContentElement.isVisible()) {
+            activityContent = await activityContentElement.textContent();
+            console.log(
+              `Found activity content: ${activityContent.substring(0, 50)}${
+                activityContent.length > 50 ? '...' : ''
+              }`
+            );
+          } else {
+            console.log(
+              'Could not find activity content element with the specified selector'
+            );
+          }
+        } catch (dateError) {
+          console.log('Error getting activity details:', dateError.message);
+        }
 
         // Ensure the button is visible in viewport before clicking
         await menuButton.scrollIntoViewIfNeeded();
@@ -258,6 +351,28 @@ async function deleteFacebookActivity() {
               // Wait for modal to disappear or action to complete
               await page.waitForTimeout(1500);
               deletedCount++;
+
+              // Save activity details to our data structure with more detailed information
+              deletedActivities.items.push({
+                url: urlBefore,
+                date: activityDate,
+                activityType: activityType,
+                activityContent: activityContent,
+                action: menuText,
+                actionType: menuText.toLowerCase().includes('delete')
+                  ? 'delete'
+                  : menuText.toLowerCase().includes('remove')
+                  ? 'remove'
+                  : 'other',
+                deletedAt: new Date().toISOString(),
+              });
+
+              // Save the updated data after each successful deletion
+              fs.writeFileSync(
+                './deletedActivity.json',
+                JSON.stringify(deletedActivities, null, 2)
+              );
+
               console.log(
                 `Successfully deleted item. Total deleted: ${deletedCount}`
               );
@@ -303,11 +418,35 @@ async function deleteFacebookActivity() {
     }
 
     // Final report
+    deletedActivities.summary.totalDeleted = deletedCount;
+    deletedActivities.summary.totalFailed = failedCount;
+    deletedActivities.summary.pageRefreshes = pageRefreshes;
+    deletedActivities.summary.endTime = new Date().toISOString();
+
     console.log('\n===== FACEBOOK ACTIVITY DELETION REPORT =====');
     console.log(`Total items successfully deleted: ${deletedCount}`);
     console.log(`Total items failed to delete: ${failedCount}`);
     console.log(`Page refreshes: ${pageRefreshes}`);
     console.log('==========================================\n');
+
+    // Save final report to deletedActivity.json
+    fs.writeFileSync(
+      './deletedActivity.json',
+      JSON.stringify(deletedActivities, null, 2)
+    );
+    console.log(`Deletion report saved to deletedActivity.json`);
+
+    // Also save a timestamped backup copy
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/:/g, '-')
+      .replace(/\..+/, '');
+    const backupFilename = `deleted_activities_backup_${timestamp}.json`;
+    fs.writeFileSync(
+      backupFilename,
+      JSON.stringify(deletedActivities, null, 2)
+    );
+    console.log(`Backup copy saved to ${backupFilename}`);
   } catch (error) {
     console.error('Fatal error during execution:', error);
   } finally {
@@ -333,6 +472,7 @@ function waitForKeyPress() {
 }
 
 // Helper function to scroll down the page to load more content
+// This is still needed in some cases, but we'll use refresh more aggressively
 async function autoScroll(page) {
   await page.evaluate(async () => {
     await new Promise((resolve) => {
