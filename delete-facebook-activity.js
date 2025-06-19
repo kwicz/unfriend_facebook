@@ -159,6 +159,7 @@ async function deleteFacebookActivity() {
         let activityDate = null;
         let activityType = null;
         let activityContent = null;
+        let activityLink = null;
 
         try {
           // Find the parent activity log item that contains this menu button
@@ -184,6 +185,18 @@ async function deleteFacebookActivity() {
               'span[style="--fontSize: 13px; --lineHeight: 18.2231px; --8dd7yt: -0.3547em; --hxtmnb: -0.3376em;"]'
             )
             .first();
+
+          // Get the activity link using the View button
+          const viewLinkElement = activityItem
+            .locator('a[aria-label="View"]')
+            .first();
+
+          if (await viewLinkElement.isVisible()) {
+            activityLink = await viewLinkElement.getAttribute('href');
+            console.log(`Found activity link: ${activityLink}`);
+          } else {
+            console.log('Could not find activity link element');
+          }
 
           if (await dateElement.isVisible()) {
             activityDate = await dateElement.textContent();
@@ -358,6 +371,7 @@ async function deleteFacebookActivity() {
                 date: activityDate,
                 activityType: activityType,
                 activityContent: activityContent,
+                activityLink: activityLink,
                 action: menuText,
                 actionType: menuText.toLowerCase().includes('delete')
                   ? 'delete'
