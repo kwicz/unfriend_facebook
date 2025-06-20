@@ -70,11 +70,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Add debug info for messages
   debug(`Received message: ${message.action}`, 'info');
 
-  if (message.action === 'debug') {
+  if (message.action === 'ping') {
+    // Respond to ping to confirm content script is loaded
+    debug('Received ping request, sending confirmation', 'info');
+    sendResponse({ status: 'ok', loadTime: SCRIPT_LOAD_TIME });
+    return true; // Indicate that we'll respond asynchronously
+  } else if (message.action === 'debug') {
     // Special commands for debugging
     if (message.command === 'scan') {
-      scanForActivityItems();
-      sendResponse({ success: true, message: 'Page scan complete' });
+      const results = scanForActivityItems();
+      sendResponse({ success: true, message: 'Page scan complete', results });
+      return true; // Indicate that we'll respond asynchronously
     } else if (message.command === 'test') {
       testMenuInteraction()
         .then((result) => sendResponse({ success: true, result }))
@@ -82,13 +88,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ success: false, error: error.message })
         );
       return true; // Indicate async response
+    } else if (message.command === 'status') {
+      // Add a status command for diagnostics
+      sendResponse({
+        isRunning,
+        isPaused,
+        stats,
+        scriptLoadTime: SCRIPT_LOAD_TIME,
+      });
+      return true;
     }
   } else if (message.action === 'startCleaning') {
     // Only start if not already running
     if (!isRunning) {
       debug('Starting Facebook activity cleaning', 'info');
+
       // Save the old settings.timing if it exists
       const oldTiming = settings.timing ? { ...settings.timing } : null;
+
       // Update settings with the new ones
       settings = message.settings || settings;
 
@@ -114,27 +131,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Add status indicator to the page
       addStatusIndicator();
 
-      // Notify background script that we're starting
+      // Send explicit confirmation that we've started
       chrome.runtime.sendMessage({
-        action: 'startCleaning',
+        action: 'cleaningStarted',
+        timestamp: Date.now(),
       });
 
       // Start the cleaning process
       startActivityCleaning();
+
+      // Send immediate response to the calling code
+      sendResponse({ success: true, message: 'Cleaning started' });
     } else {
       debug('Cleaning already in progress', 'warning');
+      sendResponse({ success: false, message: 'Cleaning already in progress' });
     }
+    return true; // Indicate we're responding asynchronously
   } else if (message.action === 'stopCleaning') {
+    const wasRunning = isRunning;
     isRunning = false;
     updateStatusMessage('Cleaning stopped');
 
-    // Notify background script that we're stopping
+    // Send explicit confirmation that we've stopped
     chrome.runtime.sendMessage({
-      action: 'stopCleaning',
+      action: 'cleaningStopped',
+      timestamp: Date.now(),
     });
+
+    sendResponse({
+      success: true,
+      wasRunning: wasRunning,
+      message: wasRunning ? 'Cleaning stopped' : 'Cleaning was not running',
+    });
+    return true; // Indicate we're responding asynchronously
   } else if (message.action === 'pauseCleaning') {
     isPaused = true;
     updateStatusMessage('Cleaning paused');
+    sendResponse({ success: true });
+    return true;
   } else if (message.action === 'resumeCleaning') {
     isPaused = false;
     updateStatusMessage('Cleaning resumed');
@@ -148,7 +182,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         processNextBatch();
       }
     }, 500);
+
+    sendResponse({ success: true });
+    return true;
+  } else if (message.action === 'getStatus') {
+    // New method to get current status
+    sendResponse({
+      isRunning: isRunning,
+      isPaused: isPaused,
+      stats: stats,
+      scriptLoadTime: SCRIPT_LOAD_TIME,
+    });
+    return true;
   }
+
+  // For messages that don't need a response
+  // This helps avoid "The message port closed before a response was received" errors
+  sendResponse({ received: true });
+  return true;
 });
 
 // Initialize debugging tools - but hidden by default
@@ -279,10 +330,15 @@ function updateStatusMessage(message) {
   }
 
   // Also send message to popup
-  chrome.runtime.sendMessage({
-    action: 'updateStatus',
-    status: message,
-  });
+  try {
+    chrome.runtime.sendMessage({
+      action: 'updateStatus',
+      status: message,
+    });
+  } catch (error) {
+    // Ignore errors sending messages as the popup might be closed
+    console.log('Could not send status update to popup (likely closed)');
+  }
 }
 
 // Add a log message to the log panel
@@ -340,6 +396,14 @@ async function startActivityCleaning() {
   if (!window.location.href.includes('facebook.com')) {
     updateStatusMessage('Please navigate to Facebook first');
     isRunning = false;
+
+    // Send confirmation that we've stopped
+    chrome.runtime.sendMessage({
+      action: 'cleaningStopped',
+      reason: 'not_facebook',
+      timestamp: Date.now(),
+    });
+
     return;
   }
 
@@ -1634,15 +1698,21 @@ function extractContent(activityItem) {
   }
 }
 
-// Helper function to update stats
+// Update the stats display and send to popup
 function updateStats() {
   // Update pageRefreshes in the stats
   stats.pageRefreshes = pageRefreshes;
 
-  chrome.runtime.sendMessage({
-    action: 'updateStats',
-    stats: stats,
-  });
+  // Periodically check if popup is still listening
+  try {
+    chrome.runtime.sendMessage({
+      action: 'updateStats',
+      stats: stats,
+    });
+  } catch (error) {
+    // Popup might be closed, ignore this error
+    console.log('Could not send stats update (popup likely closed)');
+  }
 }
 
 // Simple sleep function
@@ -1755,7 +1825,7 @@ async function testMenuInteraction() {
     debug('Clicking menu button...', 'info');
     menuButton.click();
     await sleep(800);
-    debug('Can you hear me?...', 'info');
+
     // Check if menu opened
     const menuItems = document.querySelectorAll('div[role="menuitem"]');
     if (menuItems.length > 0) {
@@ -1764,15 +1834,6 @@ async function testMenuInteraction() {
         `Menu opened successfully. Found ${menuItems.length} items:`,
         'success'
       );
-
-      debug('Is this mic on?', 'info');
-      debug(`Clicking: "${menuItems[0]}"`, 'info');
-      try {
-        menuItems[0].click();
-        debug('Menu item[0] clicked');
-      } catch (clickError) {
-        debug(`Error clicking menu item: ${clickError.message}`, 'error');
-      }
 
       // Check each menu item
       const menuTexts = [];
@@ -1802,15 +1863,6 @@ async function testMenuInteraction() {
           debug(`Found target action: "${text}"`, 'success');
         }
       });
-
-      debug('Is this mic on?', 'info');
-      debug(`Clicking: "${menuItems[0]}"`, 'info');
-      try {
-        menuItems[0].click();
-        debug('Menu item[0] clicked');
-      } catch (clickError) {
-        debug(`Error clicking menu item: ${clickError.message}`, 'error');
-      }
 
       results.menuItems = menuTexts;
       results.targetActionFound = foundTargetAction;

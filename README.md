@@ -1,6 +1,6 @@
 # Unfriend Facebook
 
-This project uses Playwright to automate the deletion of Facebook activity from your activity log, helping you clean up your digital footprint specifically by removing activities that appear on the /allactivity page.
+This project uses Playwright to automate the deletion of Facebook activity from your activity log, helping you clean up your digital footprint specifically by removing activities that appear on the /allactivity page. The project is also available as a Chrome extension for easier access.
 
 ## Getting Started
 
@@ -35,9 +35,33 @@ This project uses Playwright to automate the deletion of Facebook activity from 
 
 ## Usage Options
 
-This project offers two different methods for deleting Facebook activities:
+This project offers three different methods for deleting Facebook activities:
 
-### Option 1: Node.js Script with Playwright (Recommended)
+### Option 1: Chrome Extension (Easiest)
+
+The Chrome extension provides a convenient interface to help you delete your Facebook activity:
+
+1. **Install the extension**:
+
+   - In Chrome, go to Menu (three dots) > More tools > Extensions
+   - Enable "Developer mode" in the top right corner
+   - Click "Load unpacked" and select the project folder
+   - The Unfriend Facebook extension icon should appear in your browser toolbar
+
+2. **Using the extension**:
+
+   - Log into your Facebook account
+   - Navigate to your Facebook activity page
+   - Click the Unfriend Facebook extension icon in your toolbar
+   - Follow the on-screen instructions in the popup to start the deletion process
+   - The extension will automate the deletion process directly in your browser
+
+3. **Extension features**:
+   - Easy-to-use interface for managing Facebook activity
+   - Runs directly in your browser without need for external scripts
+   - Visual feedback on deletion progress
+
+### Option 2: Node.js Script with Playwright (Recommended for Batch Processing)
 
 This method uses a standalone Node.js script with Playwright for automation:
 
@@ -61,7 +85,7 @@ This method uses a standalone Node.js script with Playwright for automation:
 
 6. A log of deleted activities will be saved to `deletedActivity.json` for your reference.
 
-### Option 2: Browser Console Script
+### Option 3: Browser Console Script
 
 For users who prefer to run the script directly in their browser:
 
@@ -89,6 +113,7 @@ This automation tool helps you delete activities from your Facebook activity log
 - Clicks through Facebook's deletion flow for each activity
 - Continues until no more activities are found or you terminate it
 - The Node.js script additionally tracks and saves information about deleted activities
+- Chrome extension provides a user-friendly interface for the deletion process
 
 ## Important Notes
 
