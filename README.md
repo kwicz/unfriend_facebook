@@ -33,17 +33,13 @@ This project uses Playwright to automate the deletion of Facebook activity from 
    npx playwright install
    ```
 
-### Starting the Server
+## Usage Options
 
-This project uses the Model Context Protocol (MCP) server for Playwright. To start the server:
+This project offers two different methods for deleting Facebook activities:
 
-1. Open the project in Visual Studio Code
-2. Use the Command Palette (Cmd+Shift+P on macOS) and search for "MCP: Start Server"
-3. Select the "playwright" server defined in the `.vscode/mcp.json` file
+### Option 1: Node.js Script with Playwright (Recommended)
 
-The MCP server will start running and provide browser automation capabilities for the script.
-
-### Usage
+This method uses a standalone Node.js script with Playwright for automation:
 
 1. Run the activity deletion script:
 
@@ -63,20 +59,40 @@ The MCP server will start running and provide browser automation capabilities fo
 
 5. The script will continue running until no more activities are found or you terminate it with Ctrl+C.
 
+6. A log of deleted activities will be saved to `deletedActivity.json` for your reference.
+
+### Option 2: Browser Console Script
+
+For users who prefer to run the script directly in their browser:
+
+1. Log into Facebook in your preferred browser
+2. Navigate to your activity page (https://www.facebook.com/{username}/allactivity/)
+3. Open the browser developer console:
+   - Chrome/Edge: F12 or Ctrl+Shift+J (Windows) or Cmd+Option+J (Mac)
+   - Firefox: F12 or Ctrl+Shift+K (Windows) or Cmd+Option+K (Mac)
+   - Safari: Cmd+Option+C (first enable developer menu in Safari preferences)
+4. Copy the entire contents of the `dev-console-delete-activity.js` file
+5. Paste the code into the console and press Enter to begin the deletion process
+6. The script will run in your browser and display progress in the console
+
 ## Features
 
-This automation tool specifically helps you delete activities from your Facebook activity log (/allactivity page):
+This automation tool helps you delete activities from your Facebook activity log (/allactivity page):
 
 - Automatically navigates to your Facebook activity log
-- Identifies deletable activities in your history
+- Identifies deletable activities in your history including:
+  - Posts
+  - Comments
+  - Likes/Reactions
+  - Tags
+  - Other activities in your history
 - Clicks through Facebook's deletion flow for each activity
 - Continues until no more activities are found or you terminate it
+- The Node.js script additionally tracks and saves information about deleted activities
 
-Note: The tool currently only focuses on the activities shown in your Facebook activity log (https://www.facebook.com/{username}/allactivity/) and does not include other features mentioned previously like post deletion from your profile page, comment cleanup, or like/reaction removal beyond what appears in your activity log.
+## Important Notes
 
-## Usage
-
-⚠️ **Important**: This tool automates interactions with Facebook. Use responsibly and be aware of Facebook's terms of service. Consider the following:
+⚠️ **Important**: These tools automate interactions with Facebook. Use responsibly and be aware of Facebook's terms of service. Consider the following:
 
 - Run the automation slowly to avoid triggering Facebook's anti-bot measures
 - Be prepared for potential account restrictions
@@ -85,7 +101,7 @@ Note: The tool currently only focuses on the activities shown in your Facebook a
 
 ## Safety and Legal Considerations
 
-- This tool is for personal use only
+- These tools are for personal use only
 - You are responsible for complying with Facebook's terms of service
 - The automation may break if Facebook updates their interface
 - Use at your own risk

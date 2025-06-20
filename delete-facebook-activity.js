@@ -23,6 +23,11 @@ try {
     );
     if (existingData && existingData.items) {
       deletedActivities.items = existingData.items;
+      // Also maintain the existing totalDeleted count if it exists
+      if (existingData.summary && existingData.summary.totalDeleted) {
+        deletedActivities.summary.totalDeleted =
+          existingData.summary.totalDeleted;
+      }
       console.log(
         `Loaded ${existingData.items.length} existing activity records`
       );
@@ -59,14 +64,27 @@ async function deleteFacebookActivity() {
   const activityURL = await getActivityURL();
   console.log(`Using activity URL: ${activityURL}`);
 
-  // Launch browser
+  // Centralized timing settings for easy tuning
+  const TIMING = {
+    MENU_WAIT: 700, // Wait after clicking menu button
+    MODAL_WAIT: 700, // Wait for modal to appear
+    ACTION_COMPLETE: 1200, // Wait for action to complete
+    NEXT_ITEM: 1000, // Wait before proceeding to next item
+    PAGE_LOAD: 2500, // Wait after page reload
+  };
+
+  // Launch browser with optimized settings
   const browser = await chromium.launch({
     headless: false,
-    slowMo: 50, // Reduced from 100 to 50 to make script faster
+    slowMo: 30, // Reduced for better performance
   });
 
   const context = await browser.newContext();
   const page = await context.newPage();
+
+  // Add this near the top of the file, after the deletedActivities declaration
+  let lastSaveTime = Date.now();
+  const SAVE_INTERVAL = 5000; // Save every 5 seconds instead of every deletion
 
   try {
     // Navigate to the Facebook activity page
@@ -88,6 +106,8 @@ async function deleteFacebookActivity() {
     const MAX_CONSECUTIVE_FAILURES = 5;
     let pageRefreshes = 0;
     const MAX_PAGE_REFRESHES = 5;
+    const MAX_ACTION_RETRIES = 2; // Maximum number of times to retry a failed action
+    const errorTypes = {}; // Track different types of errors
 
     // Main deletion loop
     while (!noMoreItems) {
@@ -134,26 +154,54 @@ async function deleteFacebookActivity() {
         // Reset consecutive failures counter if we found items
         consecutiveFailures = 0;
 
-        // Get the first visible menu button
-        const visibleButtons = [];
-        for (let i = 0; i < count; i++) {
-          const button = menuButtons.nth(i);
-          if (await button.isVisible()) {
-            visibleButtons.push(button);
+        // Get the first visible menu button - improved with better selector handling
+        let visibleButton = null;
+
+        try {
+          // First try to find a button that's already in view
+          visibleButton = await page
+            .locator('div[aria-label="More options"]')
+            .filter({ has: page.locator(':visible') })
+            .first();
+
+          // If no visible button found, try to find any button and scroll it into view
+          if (!visibleButton || !(await visibleButton.isVisible())) {
+            const anyButton = page
+              .locator('div[aria-label="More options"]')
+              .first();
+            if ((await anyButton.count()) > 0) {
+              await anyButton.scrollIntoViewIfNeeded();
+              await page.waitForTimeout(300);
+              visibleButton = anyButton;
+            }
+          }
+        } catch (error) {
+          console.log(
+            'Error finding visible menu button, will try standard approach:',
+            error.message
+          );
+
+          // Fall back to the previous method if the optimized approach fails
+          const visibleButtons = [];
+          for (let i = 0; i < count; i++) {
+            const button = menuButtons.nth(i);
+            if (await button.isVisible()) {
+              visibleButtons.push(button);
+            }
+          }
+
+          if (visibleButtons.length > 0) {
+            visibleButton = visibleButtons[0];
           }
         }
 
-        if (visibleButtons.length === 0) {
-          console.log(
-            'No visible menu buttons found, scrolling to find more...'
-          );
+        if (!visibleButton) {
+          console.log('No visible menu buttons found, trying scrolling...');
           await autoScroll(page);
-          await page.waitForTimeout(1000); // Reduced from 1500 to 1000
           continue;
         }
 
-        // Use the first visible button
-        const menuButton = visibleButtons[0];
+        const menuButton = visibleButton;
 
         // Before clicking the menu, try to get the activity date using the specified selector
         let activityDate = null;
@@ -175,16 +223,27 @@ async function deleteFacebookActivity() {
           // Get the activity type using the specific CSS selector
           const activityTypeElement = activityItem
             .locator(
-              'span[style="--fontSize: 15px; --lineHeight: 19.6421px; --8dd7yt: -0.3085em; --hxtmnb: -0.2915em;"]'
+              'div:first-child > span[dir="auto"] > span.html-span > span.html-span > span > div'
             )
             .first();
+
+          // const activityTypeElement = activityItem
+          //   .locator(
+          //     'span[style="--fontSize: 15px; --lineHeight: 19.6421px; --8dd7yt: -0.3085em; --hxtmnb: -0.2915em;"]'
+          //   )
+          //   .first();
 
           // Get the activity content using the specific CSS selector
           const activityContentElement = activityItem
             .locator(
-              'span[style="--fontSize: 13px; --lineHeight: 18.2231px; --8dd7yt: -0.3547em; --hxtmnb: -0.3376em;"]'
+              'div:nth-child(2) > span[dir="auto"] > span.html-span > span.html-span'
             )
             .first();
+          // const activityContentElement = activityItem
+          //   .locator(
+          //     'span[style="--fontSize: 13px; --lineHeight: 18.2231px; --8dd7yt: -0.3547em; --hxtmnb: -0.3376em;"]'
+          //   )
+          //   .first();
 
           // Get the activity link using the View button
           const viewLinkElement = activityItem
@@ -237,44 +296,48 @@ async function deleteFacebookActivity() {
         console.log('Clicking menu button...');
         // Click the menu button
         await menuButton.click({ force: true });
-        await page.waitForTimeout(800); // Reduced from 1000 to 800
+        await page.waitForTimeout(TIMING.MENU_WAIT); // Use centralized timing
 
         // Look for the menu items
         const menuItems = page.locator('div[role="menuitem"]');
         const menuItemCount = await menuItems.count();
 
         // Wait a moment for the menu to fully appear
-        await page.waitForTimeout(800); // Reduced from 1000 to 800
+        await page.waitForTimeout(TIMING.MODAL_WAIT); // Use centralized timing
 
         if (menuItemCount > 0) {
-          // Check first menu item text
-          const firstMenuItem = menuItems.nth(0);
-          const firstMenuText = await firstMenuItem.textContent();
+          // Check for specific action buttons we want to click: "Remove Tag", "Unlike", "Delete", or "Move to trash"
+          let menuItemToClick = null;
+          let menuText = null;
+          const targetActions = [
+            'Remove Tag',
+            'Unlike',
+            'Delete',
+            'Move to trash',
+            'Remove Reaction',
+          ];
 
-          // Determine which menu item to click
-          let menuItemToClick;
-          let menuText;
+          // Loop through all menu items to find the target actions
+          for (let i = 0; i < menuItemCount; i++) {
+            const menuItem = menuItems.nth(i);
+            const itemText = await menuItem.textContent();
 
-          // If first item contains "Hide", use the second menu item (if available)
-          if (firstMenuText.includes('Hide')) {
-            if (menuItemCount > 1) {
-              menuItemToClick = menuItems.nth(1);
-              menuText = await menuItemToClick.textContent();
-              console.log(
-                `First item contains "Hide", clicking second menu item: "${menuText}"`
-              );
-            } else {
-              // If only one item is available (which has "Hide"), just close and skip
-              console.log('Only "Hide" option available, skipping this item');
-              await page.keyboard.press('Escape');
-              await page.waitForTimeout(800);
-              continue;
+            if (targetActions.some((action) => itemText.includes(action))) {
+              menuItemToClick = menuItem;
+              menuText = itemText;
+              console.log(`Found target action: "${menuText}"`);
+              break;
             }
-          } else {
-            // Use the first menu item if it doesn't contain "Hide"
-            menuItemToClick = firstMenuItem;
-            menuText = firstMenuText;
-            console.log(`Clicking first menu item: "${menuText}"`);
+          }
+
+          // If we didn't find any of our target actions
+          if (!menuItemToClick) {
+            console.log(
+              'No target action found ("Remove Tag", "Unlike", "Delete", or "Move to trash", "Remove Reaction"), skipping this item'
+            );
+            await page.keyboard.press('Escape');
+            await page.waitForTimeout(800);
+            continue;
           }
 
           // Store the current URL or some element count to detect changes
@@ -290,7 +353,7 @@ async function deleteFacebookActivity() {
           console.log('Looking for confirmation modal...');
 
           // Wait for any modal dialog to appear
-          await page.waitForTimeout(800);
+          await page.waitForTimeout(TIMING.MODAL_WAIT); // Use centralized timing
 
           // Check specifically for the three modal types
           let confirmed = false;
@@ -301,6 +364,9 @@ async function deleteFacebookActivity() {
             const removeModal = page.locator('div[aria-label="Remove?"]');
             const removeTagsModal = page.locator(
               'div[aria-label="Remove tags?"]'
+            );
+            const moveToTrashModal = page.locator(
+              'div[aria-label="Move to Trash?"]'
             );
 
             if (await deleteModal.isVisible()) {
@@ -340,6 +406,19 @@ async function deleteFacebookActivity() {
                 await removeTagsButton.click();
                 confirmed = true;
               }
+            }
+            // Check for Move to Trash modal
+            else if (await moveToTrashModal.isVisible()) {
+              console.log('Move to Trash? modal found');
+              // Look for Move to Trash button specifically within this modal
+              const moveToTrashButton = moveToTrashModal
+                .locator('div[aria-label="Move to Trash"]')
+                .first();
+              if (await moveToTrashButton.isVisible()) {
+                console.log('Clicking Move to Trash button...');
+                await moveToTrashButton.click();
+                confirmed = true;
+              }
             } else {
               // No modal found - check if the page content changed indicating a successful deletion
               await page.waitForTimeout(1000);
@@ -362,7 +441,7 @@ async function deleteFacebookActivity() {
 
             if (confirmed) {
               // Wait for modal to disappear or action to complete
-              await page.waitForTimeout(1500);
+              await page.waitForTimeout(TIMING.ACTION_COMPLETE);
               deletedCount++;
 
               // Save activity details to our data structure with more detailed information
@@ -381,11 +460,19 @@ async function deleteFacebookActivity() {
                 deletedAt: new Date().toISOString(),
               });
 
-              // Save the updated data after each successful deletion
-              fs.writeFileSync(
-                './deletedActivity.json',
-                JSON.stringify(deletedActivities, null, 2)
-              );
+              // Update the summary totals with each successful deletion
+              deletedActivities.summary.totalDeleted++;
+
+              // Save the updated data periodically instead of after each deletion
+              const now = Date.now();
+              if (now - lastSaveTime > SAVE_INTERVAL) {
+                fs.writeFileSync(
+                  './deletedActivity.json',
+                  JSON.stringify(deletedActivities, null, 2)
+                );
+                lastSaveTime = now;
+                console.log('Saved deletion progress to file');
+              }
 
               console.log(
                 `Successfully deleted item. Total deleted: ${deletedCount}`
@@ -394,9 +481,101 @@ async function deleteFacebookActivity() {
               console.log(
                 'Could not find expected buttons in the modal or confirm deletion'
               );
-              // Try to close the modal and continue
-              await page.keyboard.press('Escape');
-              failedCount++;
+
+              // Add retry logic for failed confirmations
+              let retrySuccess = false;
+
+              for (
+                let retryCount = 0;
+                retryCount < MAX_ACTION_RETRIES && !retrySuccess;
+                retryCount++
+              ) {
+                console.log(
+                  `Retry attempt ${
+                    retryCount + 1
+                  }/${MAX_ACTION_RETRIES} for confirmation...`
+                );
+
+                // Try pressing Escape to close the dialog first
+                await page.keyboard.press('Escape');
+                await page.waitForTimeout(500);
+
+                // Try clicking the menu button again
+                try {
+                  await menuButton.click({ force: true });
+                  await page.waitForTimeout(TIMING.MENU_WAIT);
+
+                  // Try clicking the menu item again
+                  if (menuItemToClick && (await menuItemToClick.isVisible())) {
+                    await menuItemToClick.click();
+                    await page.waitForTimeout(TIMING.MODAL_WAIT);
+
+                    // Check for confirmation dialog again
+                    // This is a simplified check - we're just looking for any of the modal types
+                    const anyModal = page.locator(
+                      'div[aria-label="Delete?"], div[aria-label="Remove?"], div[aria-label="Remove tags?"], div[aria-label="Move to Trash?"]'
+                    );
+                    if (await anyModal.isVisible()) {
+                      const actionButton = anyModal
+                        .locator(
+                          'div[aria-label="Delete"], div[aria-label="Remove"], div[aria-label="Move to Trash"]'
+                        )
+                        .first();
+                      if (await actionButton.isVisible()) {
+                        await actionButton.click();
+                        console.log('Retry succeeded!');
+                        retrySuccess = true;
+                        confirmed = true;
+
+                        // Need to repeat the deletedActivities update here
+                        deletedCount++;
+                        deletedActivities.items.push({
+                          url: urlBefore,
+                          date: activityDate,
+                          activityType: activityType,
+                          activityContent: activityContent,
+                          activityLink: activityLink,
+                          action: menuText,
+                          actionType: menuText.toLowerCase().includes('delete')
+                            ? 'delete'
+                            : menuText.toLowerCase().includes('remove')
+                            ? 'remove'
+                            : 'other',
+                          deletedAt: new Date().toISOString(),
+                        });
+                        deletedActivities.summary.totalDeleted++;
+
+                        // Save progress if needed
+                        const now = Date.now();
+                        if (now - lastSaveTime > SAVE_INTERVAL) {
+                          fs.writeFileSync(
+                            './deletedActivity.json',
+                            JSON.stringify(deletedActivities, null, 2)
+                          );
+                          lastSaveTime = now;
+                          console.log('Saved deletion progress to file');
+                        }
+                      }
+                    }
+                  }
+                } catch (retryError) {
+                  console.log(
+                    `Retry attempt ${retryCount + 1} failed:`,
+                    retryError.message
+                  );
+                }
+
+                // If still not successful, try pressing Escape to close any dialogs
+                if (!retrySuccess) {
+                  await page.keyboard.press('Escape');
+                  await page.waitForTimeout(500);
+                }
+              }
+
+              if (!retrySuccess) {
+                // If all retries failed, increment the failure count
+                failedCount++;
+              }
             }
           } catch (modalError) {
             console.log('Error handling modal:', modalError.message);
@@ -413,34 +592,53 @@ async function deleteFacebookActivity() {
         }
 
         // Wait a moment before continuing to next item
-        await page.waitForTimeout(1500); // Reduced from 2000 to 1500
+        await page.waitForTimeout(TIMING.NEXT_ITEM); // Use centralized timing
       } catch (error) {
         console.error('Error during deletion process:', error);
         failedCount++;
 
+        // Track error types for reporting
+        const errorType = error.name || 'UnknownError';
+        errorTypes[errorType] = (errorTypes[errorType] || 0) + 1;
+
         // Try to recover by pressing Escape and continuing
         try {
           await page.keyboard.press('Escape');
-          await page.waitForTimeout(800); // Reduced from 1000 to 800
+          await page.waitForTimeout(800);
           await page.keyboard.press('Escape'); // Press twice to ensure menus are closed
         } catch (escapeError) {
           // Ignore if Escape fails
         }
 
-        await page.waitForTimeout(1500); // Reduced from 2000 to 1500
+        await page.waitForTimeout(TIMING.NEXT_ITEM);
       }
     }
 
-    // Final report
+    // Enhanced final report
     deletedActivities.summary.totalDeleted = deletedCount;
     deletedActivities.summary.totalFailed = failedCount;
     deletedActivities.summary.pageRefreshes = pageRefreshes;
     deletedActivities.summary.endTime = new Date().toISOString();
+    deletedActivities.summary.errorBreakdown = errorTypes;
+    deletedActivities.summary.successRate =
+      deletedCount > 0
+        ? ((deletedCount / (deletedCount + failedCount)) * 100).toFixed(2) + '%'
+        : '0%';
 
     console.log('\n===== FACEBOOK ACTIVITY DELETION REPORT =====');
     console.log(`Total items successfully deleted: ${deletedCount}`);
     console.log(`Total items failed to delete: ${failedCount}`);
+    console.log(`Success rate: ${deletedActivities.summary.successRate}`);
     console.log(`Page refreshes: ${pageRefreshes}`);
+
+    // Show error breakdown if any errors occurred
+    if (Object.keys(errorTypes).length > 0) {
+      console.log('\nError breakdown:');
+      Object.entries(errorTypes).forEach(([type, count]) => {
+        console.log(`  ${type}: ${count}`);
+      });
+    }
+
     console.log('==========================================\n');
 
     // Save final report to deletedActivity.json
@@ -485,27 +683,39 @@ function waitForKeyPress() {
   });
 }
 
-// Helper function to scroll down the page to load more content
-// This is still needed in some cases, but we'll use refresh more aggressively
+// Helper function to refresh the page instead of scrolling
+// We'll use refresh exclusively as per user request
 async function autoScroll(page) {
-  await page.evaluate(async () => {
-    await new Promise((resolve) => {
-      let totalHeight = 0;
-      const distance = 100;
-      const timer = setInterval(() => {
-        const scrollHeight = document.body.scrollHeight;
-        window.scrollBy(0, distance);
-        totalHeight += distance;
+  console.log(
+    'No visible menu buttons found, trying scrolls before refreshing...'
+  );
 
-        if (totalHeight >= scrollHeight - window.innerHeight) {
-          clearInterval(timer);
-          resolve();
-        }
-      }, 100);
+  // Try scrolling a couple of times first
+  for (let i = 0; i < 2; i++) {
+    await page.evaluate(() => {
+      window.scrollBy(0, 500);
     });
-  });
+    console.log(`Scroll attempt ${i + 1}/2 completed`);
+    await page.waitForTimeout(1000); // Wait a second after each scroll
 
-  console.log('Scrolled down to load more content');
+    // Check if new menu buttons appeared after scrolling
+    const buttonsAfterScroll = await page
+      .locator('div[aria-label="More options"]')
+      .count();
+    if (buttonsAfterScroll > 0) {
+      console.log(`Found ${buttonsAfterScroll} menu buttons after scrolling`);
+      return; // Exit if we found buttons
+    }
+  }
+
+  // If scrolling didn't help, refresh the page
+  console.log(
+    "Scrolling didn't reveal new menu buttons, refreshing the page..."
+  );
+  await page.reload();
+  await page.waitForTimeout(TIMING.PAGE_LOAD); // Use centralized timing
+
+  console.log('Page refreshed to find more content');
 }
 
 // Run the script
