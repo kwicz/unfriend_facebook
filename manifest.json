@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Facebook Activity Cleaner",
+  "version": "1.0",
+  "description": "Delete your Facebook activity with ease",
+  "permissions": ["scripting", "storage", "activeTab", "contextMenus"],
+  "host_permissions": ["https://*.facebook.com/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icons/icon.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.facebook.com/*"],
+      "js": ["content.js"]
+    }
+  ],
+  "icons": {
+    "48": "icons/icon.png",
+    "128": "icons/icon.png"
+  }
+}

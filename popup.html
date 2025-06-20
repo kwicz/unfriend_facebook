@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Facebook Activity Cleaner</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+          Oxygen, Ubuntu, Cantarell, sans-serif;
+        width: 380px;
+        height: 600px;
+        padding: 0;
+        margin: 0;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: #333;
+        line-height: 1.4;
+        overflow: hidden;
+      }
+
+      .container {
+        background: white;
+        padding: 16px;
+        border-radius: 8px;
+        margin: 0;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+        height: 100%;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+
+      .header {
+        text-align: center;
+        margin-bottom: 8px;
+        flex-shrink: 0;
+      }
+
+      .logo {
+        width: 32px;
+        height: 32px;
+        margin: 0 auto 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+      }
+
+      h1 {
+        font-size: 18px;
+        font-weight: 700;
+        color: #1a1a1a;
+        margin: 0 0 4px 0;
+        letter-spacing: -0.3px;
+      }
+
+      .subtitle {
+        color: #6b7280;
+        font-size: 12px;
+        margin: 0;
+      }
+
+      .step {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 4px;
+        padding: 12px;
+        margin-bottom: 8px;
+        position: relative;
+        transition: all 0.2s ease;
+        flex-shrink: 0;
+      }
+
+      .step:hover {
+        border-color: #1877f2;
+        box-shadow: 0 1px 4px rgba(24, 119, 242, 0.1);
+      }
+
+      .step-number {
+        position: absolute;
+        top: -6px;
+        left: 10px;
+        background: #1877f2;
+        color: white;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 9px;
+        font-weight: 600;
+      }
+
+      .step-title {
+        font-weight: 600;
+        color: #1a1a1a;
+        margin-bottom: 6px;
+        font-size: 13px;
+        padding-left: 4px;
+      }
+
+      .step-content {
+        color: #4b5563;
+        font-size: 11px;
+        line-height: 1.4;
+      }
+
+      .form-group {
+        margin-top: 6px;
+      }
+
+      label {
+        display: block;
+        font-weight: 500;
+        color: #374151;
+        margin-bottom: 3px;
+        font-size: 11px;
+      }
+
+      input {
+        width: 100%;
+        padding: 8px 10px;
+        border: 1px solid #e5e7eb;
+        border-radius: 4px;
+        font-size: 11px;
+        transition: all 0.2s ease;
+        background: white;
+      }
+
+      input:focus {
+        outline: none;
+        border-color: #1877f2;
+        box-shadow: 0 0 0 1px rgba(24, 119, 242, 0.1);
+      }
+
+      .field-info {
+        font-size: 9px;
+        color: #6b7280;
+        margin-top: 2px;
+        font-style: italic;
+      }
+
+      .btn {
+        background: linear-gradient(135deg, #1877f2, #42a5f5);
+        color: white;
+        border: none;
+        padding: 8px 14px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 11px;
+        transition: all 0.2s ease;
+        width: 100%;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .btn:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 2px 6px rgba(24, 119, 242, 0.3);
+      }
+
+      .btn:active:not(:disabled) {
+        transform: translateY(0);
+      }
+
+      .btn:disabled {
+        background: #9ca3af;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+      }
+
+      .btn-secondary {
+        background: white;
+        color: #1877f2;
+        border: 1px solid #1877f2;
+        margin-top: 6px;
+      }
+
+      .btn-secondary:hover:not(:disabled) {
+        background: #1877f2;
+        color: white;
+      }
+
+      .status {
+        background: linear-gradient(135deg, #f0f9ff, #e0f2fe);
+        border: 1px solid #0ea5e9;
+        border-radius: 4px;
+        padding: 12px;
+        font-size: 11px;
+        font-weight: 500;
+        color: #0c4a6e;
+        text-align: center;
+        flex-shrink: 0;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 12px;
+        flex-shrink: 0;
+      }
+
+      .stat-card {
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 4px;
+        padding: 10px;
+        text-align: center;
+        transition: all 0.2s ease;
+      }
+
+      .stat-card:hover {
+        border-color: #d1d5db;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+      }
+
+      .stat-number {
+        font-size: 16px;
+        font-weight: 700;
+        margin-bottom: 2px;
+      }
+
+      .stat-label {
+        font-size: 9px;
+        color: #6b7280;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        font-weight: 500;
+      }
+
+      .stat-deleted .stat-number {
+        color: #10b981;
+      }
+
+      .stat-failed .stat-number {
+        color: #ef4444;
+      }
+
+      .progress-bar {
+        width: 100%;
+        height: 4px;
+        background: #e5e7eb;
+        border-radius: 2px;
+        margin-top: 8px;
+        overflow: hidden;
+        flex-shrink: 0;
+      }
+
+      .progress-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #10b981, #34d399);
+        width: 0%;
+        transition: width 0.3s ease;
+        border-radius: 2px;
+      }
+
+      .icon {
+        display: inline-block;
+        margin-right: 4px;
+        font-size: 11px;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+
+      .loading {
+        animation: pulse 2s infinite;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <div class="logo">
+          <img src="/icons/icon.png" height="32" width="32""/>
+        </div>
+        <h1>Unfriend Facebook</h1>
+        <p class="subtitle">
+          Clear out your entire Facebook history with a single click!
+        </p>
+      </div>
+
+      <div class="step">
+        <div class="step-number">1</div>
+        <div class="step-title">Authentication</div>
+        <div class="step-content">
+          Please ensure you are logged into your Facebook account in your
+          browser before proceeding.
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-number">2</div>
+        <div class="step-title">Profile Setup</div>
+        <div class="step-content">
+          <div class="form-group">
+            <label for="facebookUsername"> Facebook Username or ID </label>
+            <input
+              type="text"
+              id="facebookUsername"
+              placeholder="username (from facebook.com/username)"
+              required
+            />
+            <div class="field-info">
+              Enter your username or ID from your profile URL
+            </div>
+            <button id="viewActivityLog" class="btn btn-secondary">
+              Go to Activity Page
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-number">3</div>
+        <div class="step-title">Start Cleaning</div>
+        <div class="step-content">
+          Begin the automated cleanup process for your Facebook activity.
+          <button id="startButton" class="btn" style="margin-top: 6px">
+            Start Cleaning Process
+          </button>
+        </div>
+      </div>
+
+      <div id="status" class="status">
+        Ready to clean your Facebook activity
+      </div>
+
+      <div class="stats">
+        <div class="stat-card stat-deleted">
+          <div class="stat-number" id="deletedCount">0</div>
+          <div class="stat-label">Cleaned</div>
+        </div>
+        <div class="stat-card stat-failed">
+          <div class="stat-number" id="failedCount">0</div>
+          <div class="stat-label">Failed</div>
+        </div>
+      </div>
+
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
